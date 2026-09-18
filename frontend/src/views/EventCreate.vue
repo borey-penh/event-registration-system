@@ -85,4 +85,13 @@ input, textarea, select {
 .form-row { display: flex; gap: 12px; }
 .form-row > div { flex: 1; display: flex; flex-direction: column; }
 .error { color: #dc2626; font-size: 13px; }
+
+/* ---------- Mobile ---------- */
+@media (max-width: 640px) {
+  .card { padding: 16px; }
+  /* Date/time/status inputs wrap to two-per-row instead of four squished */
+  .form-row { flex-wrap: wrap; }
+  .form-row > div { flex: 1 1 40%; }
+  .card .btn { width: 100%; padding: 13px; font-size: 15px; }
+}
 </style>

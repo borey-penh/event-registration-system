@@ -1,9 +1,12 @@
 * { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
 body {
   margin: 0;
   font-family: 'Segoe UI', 'Noto Sans Khmer', system-ui, -apple-system, sans-serif;
   color: #0f172a;
   background: #f1f5f9;
+  /* Prevent sideways scrolling on phones from stray wide elements */
+  overflow-x: hidden;
 }
 h1 { color: #0f172a; }
 
@@ -22,3 +25,39 @@ h1 { color: #0f172a; }
 
 input, select, textarea { font-family: inherit; }
 input:focus, select:focus, textarea:focus { outline: 2px solid #14b8a6; outline-offset: -1px; }
+
+/* =====================================================================
+   Mobile-first global polish
+   ===================================================================== */
+
+/* 16px input font-size stops iOS Safari auto-zooming on focus */
+input, select, textarea { font-size: 16px; }
+
+/* Comfortable touch targets on coarse pointers (phones/tablets) */
+@media (pointer: coarse) {
+  .btn { min-height: 44px; }
+  button, a.btn, label.q-option { touch-action: manipulation; }
+}
+
+/* Page titles + action buttons share the head row; wrap on narrow screens */
+.page-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 640px) {
+  .page-head { margin-bottom: 12px; }
+  .page-head h1 { font-size: 19px; }
+  .page-head .btn { width: 100%; }
+}
+
+/* Notched / home-indicator phones: keep content clear of system bars */
+@media (max-width: 768px) {
+  .panel-content {
+    padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+}

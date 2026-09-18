@@ -56,6 +56,20 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Public origin (any-network URL)
+    |--------------------------------------------------------------------------
+    |
+    | Set this to the cloudflared tunnel URL (or any public domain) and the
+    | registration QR will work from ANY network, not just your local Wi-Fi.
+    | When empty, the app falls back to the URL captured from a quick tunnel
+    | by scripts/start-public.bat (storage/app/public_origin.txt).
+    |
+    */
+
+    'public_origin' => env('APP_PUBLIC_ORIGIN'),
+
+    /*
+    |--------------------------------------------------------------------------
     | Application Timezone
     |--------------------------------------------------------------------------
     |

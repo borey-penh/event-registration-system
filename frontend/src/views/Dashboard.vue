@@ -39,19 +39,21 @@ const totals = computed(() => stats.value)
 
       <div class="card">
         <h2>Recent events</h2>
-      <table v-if="recentEvents.length">
-          <thead>
-            <tr><th>Code</th><th>Title</th><th>Status</th><th>Registrations</th></tr>
-          </thead>
-          <tbody>
-            <tr v-for="e in recentEvents" :key="e.id">
-              <td>{{ e.event_code }}</td>
-              <td>{{ e.title }}</td>
-              <td><span class="badge" :class="'badge-' + e.status">{{ e.status }}</span></td>
-              <td>{{ e.registrations_count }}</td>
-            </tr>
-          </tbody>
-        </table>
+        <div v-if="recentEvents.length" class="table-scroll">
+          <table>
+            <thead>
+              <tr><th>Code</th><th>Title</th><th>Status</th><th>Registrations</th></tr>
+            </thead>
+            <tbody>
+              <tr v-for="e in recentEvents" :key="e.id">
+                <td>{{ e.event_code }}</td>
+                <td>{{ e.title }}</td>
+                <td><span class="badge" :class="'badge-' + e.status">{{ e.status }}</span></td>
+                <td>{{ e.registrations_count }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
         <p v-else class="muted">No events yet. Create your first event.</p>
       </div>
   </div>
@@ -69,8 +71,20 @@ table { width: 100%; border-collapse: collapse; font-size: 14px; }
 th { text-align: left; color: #64748b; font-weight: 600; padding: 8px; border-bottom: 1px solid #e2e8f0; }
 td { padding: 10px 8px; border-bottom: 1px solid #f1f5f9; }
 .muted { color: #94a3b8; }
-.badge { padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; }
-.badge-open { background: #d1fae5; color: #065f46; }
-.badge-draft { background: #fef3c7; color: #92400e; }
-.badge-closed { background: #fee2e2; color: #991b1b; }
+/* ---------- Mobile ---------- */
+@media (max-width: 640px) {
+  .stat-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 16px; }
+  .stat-card { padding: 14px 16px; }
+  .stat-value { font-size: 24px; }
+  .card { padding: 14px 16px; }
+}
+
+/* Very narrow phones: the 4-up stats become a tidy 2x2 grid */
+@media (max-width: 360px) {
+  .stat-value { font-size: 21px; }
+}
+
+/* Recent-events table scrolls sideways instead of squishing */
+.table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+table { min-width: 480px; }
 </style>

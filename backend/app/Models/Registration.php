@@ -11,6 +11,7 @@ class Registration extends Model
     protected $fillable = [
         'event_id',
         'candidate_id',
+        'candidate_account_id',
         'qr_token',
         'registered_at',
         'attendance_status',
@@ -20,8 +21,10 @@ class Registration extends Model
     protected function casts(): array
     {
         return [
-            'registered_at' => 'datetime',
-            'joined_at' => 'datetime',
+            // Plain "2026-09-16 01:41:00" instead of the ISO
+            // "2026-09-16T01:41:00.000000Z" the SPA used to display raw.
+            'registered_at' => 'datetime:Y-m-d H:i:s',
+            'joined_at' => 'datetime:Y-m-d H:i:s',
         ];
     }
 
@@ -33,6 +36,11 @@ class Registration extends Model
     public function candidate(): BelongsTo
     {
         return $this->belongsTo(Candidate::class);
+    }
+
+    public function candidateAccount(): BelongsTo
+    {
+        return $this->belongsTo(CandidateAccount::class);
     }
 
     public function answers(): HasMany

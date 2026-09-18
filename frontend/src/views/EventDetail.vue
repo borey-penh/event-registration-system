@@ -3,11 +3,14 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import QRCode from 'qrcode'
 import ChoiceEditor from '../components/ChoiceEditor.vue'
+import CandidateDetailModal from '../components/CandidateDetailModal.vue'
+import AddCandidateModal from '../components/AddCandidateModal.vue'
 import { api } from '../lib/api'
 
 const route = useRoute()
 const event = ref(null)
 const candidates = ref([])
+const selectedCandidateId = ref(null)
 const registrationUrl = ref('')
 const error = ref('')
 const tab = ref('candidates')
@@ -18,6 +21,9 @@ const candidateLastPage = ref(1)
 const candidateTotal = ref(0)
 const candidateSearch = ref('')
 let searchTimer = null
+
+// Manager walk-in registration
+const showAddCandidate = ref(false)
 
 const questions = ref([])
 const savingQuestions = ref(false)
@@ -32,28 +38,56 @@ const questionTypes = [
 
 const fullRegistrationUrl = ref('')
 
-function buildUrl() {
+// Public base (scheme + host[:port]) the QR/link should use. Phones cannot
+// open "localhost" — that resolves to the phone itself — so when the manager
+// is browsing on localhost we swap in a URL other devices can actually reach:
+//   1. localStorage.publicOrigin — manual override (always wins)
+//   2. /app-info public_origin — cloudflared tunnel URL, works on ANY network
+//   3. /app-info public_host — the PC's LAN IP, works on the same Wi-Fi only
+async function resolvePublicOrigin() {
+  // Manual escape hatch: localStorage.publicOrigin (e.g. a trycloudflare URL)
+  // always wins, so a tunnel or domain can be pinned without a rebuild.
+  const override = localStorage.getItem('publicOrigin')
+  if (override) return override.replace(/\/$/, '')
+
+  try {
+    const { data } = await api.get('/app-info')
+    // Tunnel URL first: reachable from ANY network (mobile data, other Wi-Fi),
+    // even when the panel itself is opened via the LAN IP.
+    if (data.public_origin) return data.public_origin
+    if (!isLocalOrigin()) {
+      // Panel browsed via a LAN IP / domain: that origin already works for
+      // devices on the same network, so keep using it.
+      return window.location.origin
+    }
+    // Fallback for localhost browsing: same-Wi-Fi LAN host.
+    if (data.public_host) return `${window.location.protocol}//${data.public_host}`
+  } catch {
+    // Endpoint unreachable — fall through.
+  }
+
+  // Last resort: keep the current origin so the link at least opens somewhere
+  // when the manager is NOT on localhost; localhost managers see a warning.
+  return window.location.origin
+}
+
+function isLocalOrigin() {
+  return /^(http:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0))/.test(window.location.origin)
+}
+
+async function buildUrl() {
   if (!registrationUrl.value) return
-  // Use the hostname the manager is browsing from so the link works for candidates too
-  fullRegistrationUrl.value = `${window.location.origin}${registrationUrl.value}`
+  const origin = await resolvePublicOrigin()
+  fullRegistrationUrl.value = `${origin}${registrationUrl.value}`
   renderQr()
+  shareWarning.value = /localhost|127\.0\.0\.1/.test(fullRegistrationUrl.value)
+    ? 'This link still points at localhost — phones cannot open it. Run scripts/start-public.bat to get an any-network URL, or serve the app on 0.0.0.0.'
+    : ''
 }
 
 const joinedCount = computed(() => candidates.value.filter((c) => c.attendance_status === 'joined').length)
 
 onMounted(load)
-
-const expanded = ref({})
-function toggleRow(id) {
-  expanded.value[id] = !expanded.value[id]
-}
-
-function answerRows(c) {
-  return Object.entries(c.answers || {}).map(([qid, answer]) => {
-    const q = questions.value.find((x) => x.id === Number(qid))
-    return { qid, question: q?.question ?? 'Question #' + qid, answer }
-  })
-}
 
 async function loadCandidates() {
   const { data } = await api.get(`/events/${route.params.id}`, {
@@ -96,6 +130,7 @@ async function load() {
   buildUrl()
 }
 
+const shareWarning = ref('')
 const qrDataUrl = ref('')
 async function renderQr() {
   if (!fullRegistrationUrl.value) return
@@ -189,44 +224,44 @@ async function changeStatus(status) {
             @input="onCandidateSearch"
           />
           <span class="muted">{{ candidateTotal.toLocaleString() }} registered</span>
+          <button class="btn btn-ghost add-cand-btn" type="button" @click="showAddCandidate = !showAddCandidate">
+            {{ showAddCandidate ? '✕ Close' : '+ Add candidate' }}
+          </button>
         </div>
-        <table v-if="candidates.length">
+
+        <AddCandidateModal
+          v-if="showAddCandidate"
+          :event-id="route.params.id"
+          :questions="questions"
+          @added="loadCandidates"
+          @close="showAddCandidate = false"
+        />
+
+        <table v-if="candidates.length" class="regs-table">
           <thead>
-            <tr><th></th><th>Code</th><th>Name</th><th>Email</th><th>Phone</th><th>Telegram</th><th>Institution</th><th>Role</th><th>Status</th><th>Registered</th><th>Checked in</th></tr>
+            <tr><th>No</th><th>Code</th><th>Name</th><th>Email</th><th>Phone</th><th>Institution</th><th>Role</th><th>Status</th><th>Registered</th><th>Checked in</th></tr>
           </thead>
-          <template v-for="c in candidates" :key="c.registration_id">
-            <tr>
-              <td>
-                <button class="row-toggle" type="button" @click="toggleRow(c.registration_id)">
-                  {{ expanded[c.registration_id] ? '▾' : '▸' }}
-                </button>
-              </td>
-              <td>{{ c.candidate_code }}</td>
-              <td>{{ c.name }}</td>
-              <td>{{ c.email || '—' }}</td>
-              <td>{{ c.phone }}</td>
-              <td>{{ c.telegram_username || '—' }}</td>
-              <td>{{ c.institution || '—' }}</td>
-              <td>{{ c.role || '—' }}</td>
-              <td>
+          <template v-for="(c, index) in candidates" :key="c.registration_id">
+            <tr
+              class="candidate-row"
+              tabindex="0"
+              @click="selectedCandidateId = c.candidate_id"
+              @keydown.enter="selectedCandidateId = c.candidate_id"
+            >
+              <td data-label="No">{{ (candidatePage - 1) * 20 + index + 1 }}</td>
+              <td data-label="Code">{{ c.candidate_code }}</td>
+              <td data-label="Name">{{ c.name }}</td>
+              <td data-label="Email">{{ c.email || '—' }}</td>
+              <td data-label="Phone">{{ c.phone }}</td>
+              <td data-label="Institution">{{ c.institution || '—' }}</td>
+              <td data-label="Role">{{ c.role || '—' }}</td>
+              <td data-label="Status">
                 <span class="badge" :class="c.attendance_status === 'joined' ? 'badge-open' : 'badge-draft'">
                   {{ c.attendance_status }}
                 </span>
               </td>
-              <td>{{ c.registered_at }}</td>
-              <td>{{ c.joined_at || '—' }}</td>
-            </tr>
-            <tr v-if="expanded[c.registration_id]" class="answers-row">
-              <td :colspan="11">
-                <table class="answers-table">
-                  <tbody>
-                    <tr v-for="qa in answerRows(c)" :key="qa.qid">
-                      <th>{{ qa.question }}</th>
-                      <td>{{ qa.answer || '—' }}</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </td>
+              <td data-label="Registered">{{ c.registered_at }}</td>
+              <td data-label="Checked in">{{ c.joined_at || '—' }}</td>
             </tr>
           </template>
         </table>
@@ -238,7 +273,6 @@ async function changeStatus(status) {
           <button class="btn btn-ghost" :disabled="candidatePage >= candidateLastPage" @click="gotoCandidatePage(candidatePage + 1)">Next →</button>
         </div>
       </div>
-
       <!-- Form builder tab -->
       <div v-if="tab === 'form'" class="card">
         <p class="muted">Build the registration form candidates will fill in.</p>
@@ -271,7 +305,7 @@ async function changeStatus(status) {
         <img v-if="qrDataUrl" :src="qrDataUrl" alt="Registration QR" class="qr-img" />
         <div class="share-info">
           <p class="muted">Candidates scan this QR or click the link to open the registration form:</p>
-
+          <p v-if="shareWarning" class="share-warning">⚠ {{ shareWarning }}</p>
 
           <input v-model="fullRegistrationUrl" class="link-input" spellcheck="false" />
           <div class="form-actions">
@@ -283,6 +317,11 @@ async function changeStatus(status) {
         </div>
       </div>
     </template>
+
+    <CandidateDetailModal
+      :candidate-id="selectedCandidateId"
+      @close="selectedCandidateId = null"
+    />
   </div>
 </template>
 
@@ -303,22 +342,14 @@ h1 { margin: 0; font-size: 22px; }
 table { width: 100%; border-collapse: collapse; font-size: 14px; }
 th { text-align: left; color: #64748b; font-weight: 600; padding: 8px; border-bottom: 1px solid #e2e8f0; }
 td { padding: 10px 8px; border-bottom: 1px solid #f1f5f9; }
-.row-toggle {
-  border: 1px solid #e2e8f0; background: #f8fafc; border-radius: 6px;
-  width: 26px; height: 26px; cursor: pointer; color: #475569; font-size: 12px;
-}
-.row-toggle:hover { background: #f0fdfa; border-color: #5eead4; color: #0f766e; }
+.candidate-row { cursor: pointer; }
+.candidate-row:hover td { background: #f8fafc; }
+.candidate-row:focus-visible { outline: 2px solid #14b8a6; outline-offset: -2px; }
 .cand-toolbar { display: flex; align-items: center; gap: 14px; margin-bottom: 12px; }
 .cand-toolbar input { width: 360px; max-width: 100%; padding: 10px 12px; border: 1px solid #cbd5e1; border-radius: 8px; }
+.add-cand-btn { margin-left: auto; }
 .pager { display: flex; align-items: center; gap: 14px; margin-top: 14px; }
 .pager button:disabled { opacity: 0.5; cursor: not-allowed; }
-.answers-row td { background: #f8fafc; padding: 12px; }
-.answers-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-.answers-table th {
-  text-align: left; color: #334155; font-weight: 600; padding: 6px 10px;
-  width: 40%; border-bottom: 1px dashed #e2e8f0; vertical-align: top;
-}
-.answers-table td { padding: 6px 10px; border-bottom: 1px dashed #e2e8f0; color: #0f172a; }
 .badge { padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; }
 .badge-open { background: #d1fae5; color: #065f46; }
 .badge-draft { background: #fef3c7; color: #92400e; }
@@ -338,6 +369,10 @@ td { padding: 10px 8px; border-bottom: 1px solid #f1f5f9; }
   border: 1px solid #cbd5e1; color: #0f766e; font-weight: 600; font-family: monospace;
 }
 .link-input:focus { outline: 2px solid #14b8a6; background: #fff; }
+.share-warning {
+  color: #92400e; font-size: 13px; line-height: 1.5; margin: 0 0 10px;
+  background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 8px 12px;
+}
 .btn-copied {
   background: #059669; color: #fff;
   animation: pop 0.3s ease;
@@ -346,5 +381,69 @@ td { padding: 10px 8px; border-bottom: 1px solid #f1f5f9; }
   0% { transform: scale(1); }
   50% { transform: scale(1.06); }
   100% { transform: scale(1); }
+}
+
+/* ---------- Mobile ---------- */
+@media (max-width: 640px) {
+  .card { padding: 14px 16px; }
+  .page-head { flex-direction: column; align-items: flex-start; gap: 8px; }
+  h1 { font-size: 19px; }
+
+  /* Status buttons wrap comfortably instead of squeezing */
+  .status-actions { flex-wrap: wrap; }
+  .status-actions .btn { padding: 9px 18px; }
+
+  /* Tabs become even, tappable pills that scroll sideways if needed */
+  .tabs { gap: 6px; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tabs button {
+    flex: 1 0 auto;
+    padding: 10px 14px;
+    border-radius: 999px;
+    border: 1px solid #e2e8f0;
+    white-space: nowrap;
+  }
+  .tabs button.active { border-color: #0f766e; }
+
+  .cand-toolbar { flex-direction: column; align-items: stretch; gap: 8px; }
+  .cand-toolbar .muted { align-self: flex-end; }
+  .cand-toolbar input { width: 100%; }
+
+  /* Registrations become expandable cards; the form builder stacks */
+  table { display: block; overflow-x: auto; }
+  .question-main { flex-wrap: wrap; }
+  .q-input { min-width: 0; }
+  .form-actions { flex-wrap: wrap; }
+  .form-actions .btn { flex: 1 1 auto; }
+
+  .share { flex-direction: column; align-items: stretch; }
+  .share-info { width: 100%; }
+  .qr-img { align-self: center; }
+}
+
+/* Registration rows: card layout with inline labels on phones */
+@media (max-width: 640px) {
+  .regs-table thead { display: none; }
+  .regs-table, .regs-table tbody { display: block; }
+  .regs-table tr {
+    display: block;
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    padding: 8px 12px;
+    margin-bottom: 10px;
+  }
+  .regs-table td { display: flex; gap: 8px; border-bottom: 0; padding: 3px 0; }
+  .regs-table td:first-child { justify-content: flex-end; padding: 2px 0 6px; }
+  .regs-table td[data-label]::before {
+    content: attr(data-label);
+    flex: 0 0 92px;
+    font-weight: 600;
+    color: #64748b;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    padding-top: 2px;
+  }
 }
 </style>

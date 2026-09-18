@@ -24,9 +24,11 @@ class Event extends Model
     protected function casts(): array
     {
         return [
-            'start_date' => 'date',
+            // Serialize as plain "2026-09-16" — the default ISO format
+            // ("2026-09-16T00:00:00.000000Z") leaks into the SPA otherwise.
+            'start_date' => 'date:Y-m-d',
             'start_time' => 'datetime:H:i:s',
-            'end_date' => 'date',
+            'end_date' => 'date:Y-m-d',
         ];
     }
 
@@ -45,6 +47,14 @@ class Event extends Model
         return $this->hasMany(Registration::class);
     }
 
+    /** Candidates may edit while the manager keeps the event open. */
+    public function canCandidateEdit(): bool
+    {
+        // The end date is event information, not a reliable close timestamp.
+        // The manager explicitly closes the event when submissions must stop.
+        return $this->status === 'open';
+    }
+
     /**
      * Generate the next sequential event code, formatted EVT-YYYY-NN
      * (e.g. EVT-2026-01). The number resets each year.
@@ -55,7 +65,7 @@ class Event extends Model
         $prefix = "EVT-{$year}-";
 
         $max = static::where('event_code', 'like', $prefix.'%')
-            ->selectRaw("MAX(CAST(SUBSTRING(event_code, ?) AS UNSIGNED)) as max_seq", [strlen($prefix) + 1])
+            ->selectRaw('MAX(CAST(SUBSTRING(event_code, ?) AS UNSIGNED)) as max_seq', [strlen($prefix) + 1])
             ->value('max_seq');
 
         return $prefix.str_pad((string) ($max + 1), 2, '0', STR_PAD_LEFT);

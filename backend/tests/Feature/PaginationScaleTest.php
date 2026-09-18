@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\Candidate;
 use App\Models\Event;
 use App\Models\Registration;
+use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -42,7 +43,7 @@ class PaginationScaleTest extends TestCase
 
         $start = microtime(true);
 
-        $res = $this->actingAs(\App\Models\User::factory()->create())
+        $res = $this->actingAs(User::factory()->create())
             ->getJson('/api/candidates?page=1&per_page=20');
 
         $res->assertOk()
@@ -74,12 +75,33 @@ class PaginationScaleTest extends TestCase
             ]);
         }
 
-        $res = $this->actingAs(\App\Models\User::factory()->create())
+        $res = $this->actingAs(User::factory()->create())
             ->getJson("/api/events/{$event->id}?per_page=20");
 
         $res->assertOk()
             ->assertJsonCount(20, 'candidates')
             ->assertJsonPath('pagination.total', 60)
             ->assertJsonPath('pagination.last_page', 3);
+    }
+
+    public function test_event_index_paginates_instead_of_returning_every_event(): void
+    {
+        for ($i = 1; $i <= 25; $i++) {
+            Event::create([
+                'event_code' => sprintf('EVT-LIST-%02d', $i),
+                'title' => "Event {$i}",
+                'status' => 'draft',
+                'registration_token' => strtoupper(Str::random(10)),
+            ]);
+        }
+
+        $res = $this->actingAs(User::factory()->create())
+            ->getJson('/api/events?page=2&per_page=20');
+
+        $res->assertOk()
+            ->assertJsonCount(5, 'data')
+            ->assertJsonPath('current_page', 2)
+            ->assertJsonPath('last_page', 2)
+            ->assertJsonPath('total', 25);
     }
 }

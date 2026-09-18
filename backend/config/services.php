@@ -35,4 +35,37 @@ return [
         ],
     ],
 
+    /*
+    | Auth0-brokered social login. When AUTH0_* is configured, the Google and
+    | Facebook buttons route through the Auth0 tenant instead of talking to
+    | those providers directly — no Google/Facebook developer apps needed,
+    | Auth0's own development keys are used (fine for testing; production
+    | should switch the connections to your own keys in the Auth0 dashboard).
+    */
+
+    'auth0' => [
+        'domain' => env('AUTH0_DOMAIN'), // e.g. dev-xxxx.us.auth0.com
+        'client_id' => env('AUTH0_CLIENT_ID'),
+        'client_secret' => env('AUTH0_CLIENT_SECRET'),
+    ],
+
+    /*
+    | Candidate social login (Google / Facebook).
+    |
+    | The callback redirect URI is built per-request from the origin the SPA
+    | is actually served from (localhost, LAN IP, or tunnel), so one set of
+    | credentials works everywhere — register each origin's callback URL in
+    | the provider console.
+    */
+
+    'google' => [
+        'client_id' => env('GOOGLE_CLIENT_ID'),
+        'client_secret' => env('GOOGLE_CLIENT_SECRET'),
+    ],
+
+    'facebook' => [
+        'client_id' => env('FACEBOOK_CLIENT_ID'),
+        'client_secret' => env('FACEBOOK_CLIENT_SECRET'),
+    ],
+
 ];

@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Candidate;
 use App\Models\Event;
 use App\Models\FormQuestion;
 use App\Models\Registration;
@@ -9,17 +10,32 @@ use App\Models\RegistrationAnswer;
 use App\Support\DefaultForm;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Illuminate\Validation\Rules\In;
 
 class EventController extends Controller
 {
     public function index(Request $request): JsonResponse
     {
-        $events = Event::withCount('registrations')
-            ->latest()
-            ->get();
+        // Do not send the complete event history to the browser.
+        $perPage = max(1, min((int) $request->query('per_page', 20), 100));
+        $search = trim((string) $request->query('search', ''));
 
-        return response()->json($events);
+        $events = Event::query()
+            ->select(['id', 'event_code', 'title', 'start_date', 'start_time', 'status', 'created_at'])
+            ->withCount('registrations')
+            ->when($search !== '', function ($query) use ($search) {
+                $escaped = addcslashes($search, '%_\\');
+                $query->where(function ($where) use ($escaped) {
+                    $where->where('event_code', 'like', "%{$escaped}%")
+                        ->orWhere('title', 'like', "%{$escaped}%");
+                });
+            })
+            ->orderByDesc('id')
+            ->paginate($perPage);
+
+        return response()->json($events->toArray());
     }
 
     public function store(Request $request): JsonResponse
@@ -127,6 +143,116 @@ class EventController extends Controller
         $event->delete();
 
         return response()->json(['message' => 'Event deleted']);
+    }
+
+    /**
+     * Manager manually adds a candidate to an event (walk-in, phone signup…).
+     * Mirrors the self-registration dedup: candidate rows are per event and
+     * matched by email, so a person already registered for THIS event is a
+     * duplicate even if their details differ.
+     */
+    public function addCandidate(Request $request, Event $event): JsonResponse
+    {
+        $data = $request->validate([
+            'name' => ['required', 'string', 'max:255'],
+            'email' => ['nullable', 'email', 'max:255'],
+            'phone' => ['nullable', 'string', 'max:30'],
+            'institution' => ['nullable', 'string', 'max:255'],
+            'role' => ['nullable', 'string', 'max:255'],
+        ]);
+
+        // Custom form answers follow the SAME validation rules as
+        // self-registration (required, option lists, types).
+        $questions = $event->questions;
+        $answerRules = [];
+
+        foreach ($questions as $q) {
+            $rule = $q->required ? ['required'] : ['nullable'];
+
+            $rule = match ($q->type) {
+                'radio', 'select' => [...$rule, new In($q->options ?? [])],
+                'checkbox' => [...$rule, 'array'],
+                'date' => [...$rule, 'date'],
+                default => $rule,
+            };
+
+            if ($q->type === 'checkbox') {
+                $answerRules["answers.{$q->id}"] = $rule;
+                $answerRules["answers.{$q->id}.*"] = [new In($q->options ?? [])];
+            } else {
+                $answerRules["answers.{$q->id}"] = $rule;
+            }
+        }
+
+        $validatedAnswers = $answerRules !== [] ? $request->validate($answerRules) : [];
+        $answersData = $validatedAnswers['answers'] ?? [];
+
+        $email = isset($data['email']) ? mb_strtolower(trim($data['email'])) : null;
+
+        $existing = null;
+        if ($email !== null) {
+            $existing = Candidate::query()
+                ->whereRaw('LOWER(TRIM(email)) = ?', [$email])
+                ->whereExists(function ($q) use ($event) {
+                    $q->selectRaw(1)
+                        ->from('registrations')
+                        ->whereColumn('registrations.candidate_id', 'candidates.id')
+                        ->where('registrations.event_id', $event->id);
+                })
+                ->orderByDesc('id')
+                ->first();
+        }
+
+        if ($existing) {
+            return response()->json([
+                'message' => "{$existing->name} ({$existing->candidate_code}) is already registered for this event.",
+                'candidate_id' => $existing->id,
+            ], 409);
+        }
+
+        $candidate = Candidate::create([
+            'candidate_code' => Candidate::nextCandidateCode(),
+            ...$data,
+            'email' => $email,
+        ]);
+
+        $registration = DB::transaction(function () use ($event, $candidate, $questions, $answersData) {
+            $registration = Registration::create([
+                'event_id' => $event->id,
+                'candidate_id' => $candidate->id,
+                'qr_token' => 'REG-'.now()->format('Y').'-'.strtoupper(Str::random(8)),
+                'registered_at' => now(),
+                'attendance_status' => 'registered',
+            ]);
+
+            foreach ($questions as $q) {
+                $answer = $answersData[$q->id] ?? null;
+
+                if (is_array($answer)) {
+                    $answer = implode(', ', $answer);
+                }
+
+                $answer = $answer !== null ? trim((string) $answer) : null;
+
+                if ($answer === null || $answer === '') {
+                    continue; // optional question left blank — store nothing
+                }
+
+                RegistrationAnswer::create([
+                    'registration_id' => $registration->id,
+                    'question_id' => $q->id,
+                    'answer' => $answer,
+                ]);
+            }
+
+            return $registration;
+        });
+
+        return response()->json([
+            'message' => 'Candidate added.',
+            'registration_id' => $registration->id,
+            'candidate' => $candidate,
+        ], 201);
     }
 
     /**

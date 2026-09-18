@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Candidate;
+use App\Models\CandidateAccount;
 use App\Models\Event;
 use App\Models\FormQuestion;
 use App\Models\Registration;
@@ -11,6 +12,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Illuminate\Validation\Rules\In;
 use Illuminate\Validation\ValidationException;
 
 class RegistrationController extends Controller
@@ -18,9 +20,11 @@ class RegistrationController extends Controller
     /** Public: form definition for a registration link. */
     public function show(string $token): JsonResponse
     {
-        $event = Event::where('registration_token', $token)
-            ->where('status', 'open')
-            ->firstOrFail();
+        $event = Event::where('registration_token', $token)->firstOrFail();
+
+        if (! $event->canCandidateEdit()) {
+            abort(403, 'This event is closed, so registrations can no longer be changed.');
+        }
 
         return response()->json([
             'event' => [
@@ -46,9 +50,18 @@ class RegistrationController extends Controller
     /** Public: submit registration, create candidate + registration + answers, return candidate QR token. */
     public function submit(Request $request, string $token): JsonResponse
     {
-        $event = Event::where('registration_token', $token)
-            ->where('status', 'open')
-            ->firstOrFail();
+        $event = Event::where('registration_token', $token)->firstOrFail();
+
+        if (! $event->canCandidateEdit()) {
+            abort(403, 'This event is closed, so registrations can no longer be changed.');
+        }
+
+        // Optional candidate auth: when the SPA sends a candidate Bearer token,
+        // the submission is linked to that account so it can be edited later.
+        // The sanctum guard resolves the token to its owner model (User OR
+        // CandidateAccount), so we keep it only if it is a CandidateAccount.
+        $account = $request->user('sanctum');
+        $account = $account instanceof CandidateAccount ? $account : null;
 
         $questions = $event->questions;
 
@@ -58,7 +71,7 @@ class RegistrationController extends Controller
             $rule = $q->required ? ['required'] : ['nullable'];
 
             $rule = match ($q->type) {
-                'radio', 'select' => [...$rule, new \Illuminate\Validation\Rules\In($q->options ?? [])],
+                'radio', 'select' => [...$rule, new In($q->options ?? [])],
                 'checkbox' => [...$rule, 'array'],
                 'date' => [...$rule, 'date'],
                 default => $rule,
@@ -66,7 +79,7 @@ class RegistrationController extends Controller
 
             if ($q->type === 'checkbox') {
                 $rules["answers.{$q->id}"] = $rule;
-                $rules["answers.{$q->id}.*"] = [new \Illuminate\Validation\Rules\In($q->options ?? [])];
+                $rules["answers.{$q->id}.*"] = [new In($q->options ?? [])];
             } else {
                 $rules["answers.{$q->id}"] = $rule;
             }
@@ -101,24 +114,69 @@ class RegistrationController extends Controller
             ]);
         }
 
-        $registration = DB::transaction(function () use ($event, $data, $questions, $answerFor, $name) {
-            $candidate = Candidate::create([
-                'candidate_code' => 'C-'.strtoupper(Str::random(8)),
+        $registration = DB::transaction(function () use ($event, $data, $questions, $answerFor, $name, $account) {
+            // Re-submission: reuse this event's candidate with the same email
+            // (case/whitespace-insensitive) instead of creating a duplicate row
+            // for every edit. Keeps the candidate list clean.
+            $email = $answerFor(['អ៊ីម៉ែល', 'email', 'imeil']);
+            $candidate = null;
+            if ($email !== null) {
+                $candidate = Candidate::whereRaw('LOWER(TRIM(email)) = ?', [mb_strtolower(trim($email))])
+                    ->whereExists(function ($q) use ($event) {
+                        $q->selectRaw(1)
+                            ->from('registrations')
+                            ->whereColumn('registrations.candidate_id', 'candidates.id')
+                            ->where('registrations.event_id', $event->id);
+                    })
+                    ->orderByDesc('id')
+                    ->first();
+            }
+
+            $candidate ??= Candidate::create([
+                'candidate_code' => Candidate::nextCandidateCode(),
                 'name' => $name,
-                'email' => $answerFor(['អ៊ីម៉ែល', 'email', 'imeil']),
+                'email' => $email,
                 'phone' => $answerFor(['លេខទូរស័ព្ទ', 'phone']),
                 'telegram_username' => $answerFor(['telegram', 'តេលីក្រាម']),
                 'institution' => $answerFor(['ស្ថាប័ន', 'institution', 'school', 'university']),
                 'role' => $answerFor(['តួនាទី', 'role']),
             ]);
 
-            $registration = Registration::create([
-                'event_id' => $event->id,
-                'candidate_id' => $candidate->id,
-                'qr_token' => 'REG-'.now()->format('Y').'-'.strtoupper(Str::random(8)),
-                'registered_at' => now(),
-                'attendance_status' => 'registered',
-            ]);
+            // Edit flow: re-submitting updates the existing registration (and
+            // its answers) instead of duplicating it — matched by candidate
+            // account when logged in, otherwise by the candidate row resolved
+            // above so anonymous re-submissions don't stack up either.
+            $registration = null;
+
+            if ($account) {
+                $registration = Registration::where('candidate_account_id', $account->id)
+                    ->where('event_id', $event->id)
+                    ->orderByDesc('id')
+                    ->first();
+            }
+
+            if (! $registration && ! $candidate->wasRecentlyCreated) {
+                $registration = Registration::where('candidate_id', $candidate->id)
+                    ->where('event_id', $event->id)
+                    ->orderByDesc('id')
+                    ->first();
+            }
+
+            if (! $registration) {
+                $registration = new Registration;
+                $registration->qr_token = 'REG-'.now()->format('Y').'-'.strtoupper(Str::random(8));
+                $registration->registered_at = now();
+            }
+
+            $registration->event_id = $event->id;
+            $registration->candidate_id = $candidate->id;
+            // Keep an existing account link when this submission is anonymous.
+            $registration->candidate_account_id = $account?->id ?? $registration->candidate_account_id;
+            $registration->attendance_status = $registration->attendance_status ?? 'registered';
+            $registration->save();
+
+            // Replace the saved answers with the latest submission.
+            RegistrationAnswer::where('registration_id', $registration->id)->delete();
 
             foreach ($questions as $q) {
                 $answer = $data['answers'][$q->id] ?? null;
@@ -137,15 +195,20 @@ class RegistrationController extends Controller
             return $registration;
         });
 
+        // True when the transaction updated an existing registration rather
+        // than creating one (Eloquent tracks creation per model instance).
+        $isUpdate = ! $registration->wasRecentlyCreated;
+
         return response()->json([
-            'message' => 'Registration successful',
+            'message' => $isUpdate ? 'Registration updated' : 'Registration successful',
             'registration_id' => $registration->id,
+            'updated' => $isUpdate,
             'candidate' => [
                 'candidate_code' => $registration->candidate->candidate_code,
                 'name' => $registration->candidate->name,
             ],
             'qr_token' => $registration->qr_token,
-        ], 201);
+        ], $isUpdate ? 200 : 201);
     }
 
     /** Public: lookup a registration by qr_token (used to render candidate QR payload / re-show). */

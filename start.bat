@@ -1,6 +1,6 @@
 @echo off
-REM Start backend + frontend reachable from other devices on the same Wi-Fi/LAN.
-REM Candidates can then open: http://<your-ip>:5173/register/<token>
+REM Start backend + frontend reachable from other devices on the SAME Wi-Fi/LAN.
+REM For ANY network (mobile data, other Wi-Fi), run scripts\start-public.bat instead.
 
 cd /d "%~dp0"
 
@@ -19,6 +19,9 @@ echo   Frontend window (e.g. http://192.168.88.45:5173/)
 echo.
 echo   CANDIDATE LINK: http://YOUR-IP:5173/register/IT2026ABC
 echo   (shown in the Frontend window as "Network: ...")
+echo.
+echo   NOTE: only works on the SAME Wi-Fi as this PC.
+echo   For any-network QR links, run: scripts\start-public.bat
 echo ============================================================
 echo.
 pause

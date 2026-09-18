@@ -106,4 +106,15 @@ h1 { margin-top: 0; font-size: 22px; }
 .error { color: #dc2626; }
 .result-name { font-size: 18px; font-weight: 700; color: #0f172a; margin: 4px 0; }
 .muted { color: #64748b; font-size: 13px; }
+
+/* ---------- Mobile ---------- */
+@media (max-width: 640px) {
+  h1 { font-size: 19px; }
+  .card { padding: 14px 16px; }
+  .manual { flex-direction: column; }
+  .manual input { width: 100%; }
+  .manual .btn { width: 100%; padding: 11px; }
+  .result-card { padding: 20px 14px; }
+  .result-icon { font-size: 40px; }
+}
 </style>
