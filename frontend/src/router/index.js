@@ -35,4 +35,18 @@ router.beforeEach((to) => {
   }
 })
 
+// After a stale-chunk reload (see main.js) landed us on a fallback URL,
+// continue to the route the user actually wanted — e.g. the /register/{token}
+// link they opened from a QR code.
+try {
+  router.isReady().then(() => {
+    const target = sessionStorage.getItem('chunk_reload_redirect')
+    if (!target) return
+    sessionStorage.removeItem('chunk_reload_redirect')
+    if (target !== window.location.pathname + window.location.search) {
+      router.push(target).catch(() => {})
+    }
+  })
+} catch { /* storage unavailable — plain reload still helps */ }
+
 export default router

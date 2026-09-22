@@ -52,6 +52,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::apiResource('events', EventController::class);
     Route::put('/events/{event}/questions', [EventController::class, 'saveQuestions']);
     Route::post('/events/{event}/candidates', [EventController::class, 'addCandidate']);
+    Route::get('/events/{event}/candidates/export', [EventController::class, 'exportCandidates']);
+    Route::get('/events/{event}/attendance-sheet', [EventController::class, 'exportAttendance']);
 
     // Dashboard (SQL-only counts, safe for millions of rows)
     Route::get('/dashboard-stats', DashboardStatsController::class);

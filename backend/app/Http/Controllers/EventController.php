@@ -7,12 +7,14 @@ use App\Models\Event;
 use App\Models\FormQuestion;
 use App\Models\Registration;
 use App\Models\RegistrationAnswer;
+use App\Support\AttendanceSheet;
 use App\Support\DefaultForm;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rules\In;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class EventController extends Controller
 {
@@ -111,6 +113,13 @@ class EventController extends Controller
         return response()->json([
             'event' => $event,
             'registration_url' => '/register/'.$event->registration_token,
+            // Absolute HTTPS link straight from the server: the QR can be
+            // scanned by ANY scanner — many phone camera apps refuse plain
+            // http://text and open only https:// links, which is exactly the
+            // "scan opens the form but tapping the link shows nothing" gap.
+            'registration_full_url' => AppInfoController::publicOrigin()
+                ? AppInfoController::publicOrigin().'/register/'.$event->registration_token
+                : null,
             'candidates' => $candidates,
             'pagination' => [
                 'current_page' => $page->currentPage(),
@@ -298,5 +307,101 @@ class EventController extends Controller
         $event->questions()->whereNotIn('id', $keepIds)->delete();
 
         return response()->json($event->questions()->get());
+    }
+
+    /**
+     * Download the full candidate list for one event as CSV. Streams rows in
+     * lazy chunks straight to the output, so an event with a million
+     * registrations exports with constant memory — same principle as the
+     * paginated list. One extra column per form question, in form order.
+     */
+    public function exportCandidates(Request $request, Event $event): StreamedResponse
+    {
+        $questions = $event->questions()->orderBy('order')->get(['id', 'question']);
+
+        $filename = 'candidates-'.$event->event_code.'.csv';
+
+        return response()->streamDownload(function () use ($event, $questions) {
+            $out = fopen('php://output', 'w');
+
+            // UTF-8 BOM so Excel renders accented names correctly.
+            fwrite($out, "\xEF\xBB\xBF");
+
+            $header = [
+                'No', 'Code', 'Name', 'Email', 'Phone', 'Telegram', 'Institution',
+                'Role', 'Status', 'Registered at', 'Checked in at', 'Check-in code',
+            ];
+            foreach ($questions as $q) {
+                $header[] = static::csvSafe($q->question);
+            }
+            fputcsv($out, $header, ',', '"', '\\');
+
+            $no = 0;
+            $event->registrations()
+                ->with('candidate', 'answers')
+                ->lazyById(500, 'registrations.id')
+                ->each(function (Registration $reg) use (&$no, $out, $questions) {
+                    $no++;
+
+                    $answers = $reg->answers->mapWithKeys(
+                        fn (RegistrationAnswer $a) => [$a->question_id => $a->answer]
+                    );
+
+                    $row = [
+                        $no,
+                        static::csvSafe($reg->candidate->candidate_code),
+                        static::csvSafe($reg->candidate->name),
+                        static::csvSafe((string) $reg->candidate->email),
+                        static::csvSafe((string) $reg->candidate->phone),
+                        static::csvSafe((string) $reg->candidate->telegram_username),
+                        static::csvSafe((string) $reg->candidate->institution),
+                        static::csvSafe((string) $reg->candidate->role),
+                        $reg->attendance_status,
+                        $reg->registered_at?->toDateTimeString() ?? '',
+                        $reg->joined_at?->toDateTimeString() ?? '',
+                        static::csvSafe($reg->qr_token),
+                    ];
+
+                    foreach ($questions as $q) {
+                        $row[] = static::csvSafe((string) ($answers[$q->id] ?? ''));
+                    }
+
+                    fputcsv($out, $row, ',', '"', '\\');
+                });
+
+            fclose($out);
+        }, $filename, [
+            'Content-Type' => 'text/csv; charset=UTF-8',
+        ]);
+    }
+
+    /**
+     * Download the printable "Attendance List" Excel sheet for one event —
+     * logo, event info, legends, checkbox columns and ruled walk-in rows
+     * (see App\Support\AttendanceSheet for the layout).
+     */
+    public function exportAttendance(Event $event): \Symfony\Component\HttpFoundation\StreamedResponse
+    {
+        return response()->streamDownload(
+            fn () => app(AttendanceSheet::class, ['event' => $event])->save('php://output'),
+            AttendanceSheet::filename($event),
+            [
+                'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            ],
+        );
+    }
+
+    /**
+     * Neutralize Excel/Sheets CSV formula injection: a cell starting with
+     * =, +, - or @ would execute as a formula when the file is opened. The
+     * leading apostrophe forces text mode (Excel hides it on display).
+     */
+    private static function csvSafe(?string $value): string
+    {
+        if ($value !== null && $value !== '' && strpbrk($value[0], '=+-@') !== false) {
+            return "'".$value;
+        }
+
+        return $value ?? '';
     }
 }

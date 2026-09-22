@@ -37,6 +37,9 @@ const questionTypes = [
 ]
 
 const fullRegistrationUrl = ref('')
+// Absolute HTTPS link baked by the server (public tunnel origin) when one is
+// configured; empty otherwise, so the client-side origin logic takes over.
+const registrationFullUrl = ref('')
 
 // Public base (scheme + host[:port]) the QR/link should use. Phones cannot
 // open "localhost" — that resolves to the phone itself — so when the manager
@@ -60,8 +63,15 @@ async function resolvePublicOrigin() {
       // devices on the same network, so keep using it.
       return window.location.origin
     }
-    // Fallback for localhost browsing: same-Wi-Fi LAN host.
-    if (data.public_host) return `${window.location.protocol}//${data.public_host}`
+    // Fallback for localhost browsing: same-Wi-Fi LAN host. In dev mode the
+    // SPA is served by Vite (port 5173) and only /api is proxied to Laravel,
+    // so replace the API port with the dev-server port — a :8000 link would
+    // 404 on the phone (no SPA there), while :5173 serves everything.
+    if (data.public_host) {
+      const [host, apiPort] = data.public_host.split(':')
+      const port = import.meta.env.DEV ? String(import.meta.env.VITE_DEV_SERVER_PORT || 5173) : apiPort
+      return `${window.location.protocol}//${host}${port ? `:${port}` : ''}`
+    }
   } catch {
     // Endpoint unreachable — fall through.
   }
@@ -77,8 +87,11 @@ function isLocalOrigin() {
 
 async function buildUrl() {
   if (!registrationUrl.value) return
-  const origin = await resolvePublicOrigin()
-  fullRegistrationUrl.value = `${origin}${registrationUrl.value}`
+  // Server-baked absolute URL wins: it is the HTTPS link that phone camera
+  // apps and QR scanners can actually open (plain http://text is often
+  // refused, which is the "scan works, link shows nothing" gap).
+  fullRegistrationUrl.value = registrationFullUrl.value
+    || await resolvePublicOrigin() + registrationUrl.value
   renderQr()
   shareWarning.value = /localhost|127\.0\.0\.1/.test(fullRegistrationUrl.value)
     ? 'This link still points at localhost — phones cannot open it. Run scripts/start-public.bat to get an any-network URL, or serve the app on 0.0.0.0.'
@@ -100,6 +113,7 @@ async function loadCandidates() {
   event.value = data.event
   candidates.value = data.candidates
   registrationUrl.value = data.registration_url
+  registrationFullUrl.value = data.registration_full_url || ''
   candidatePage.value = data.pagination.current_page
   candidateLastPage.value = data.pagination.last_page
   candidateTotal.value = data.pagination.total
@@ -188,6 +202,49 @@ async function changeStatus(status) {
   const { data } = await api.put(`/events/${route.params.id}`, { status })
   event.value.status = data.status
 }
+
+// ---------- Candidate list export (CSV + printable Excel) ----------
+const exporting = ref('') // which export is running, '' = none
+const exportError = ref('')
+
+async function downloadFile(path, fallbackName) {
+  // Blob request instead of a plain <a href> so the Authorization header
+  // is sent — a direct link would hit the route without a token and 401.
+  const res = await api.get(path, { responseType: 'blob' })
+  const match = (res.headers?.['content-disposition'] || '').match(/filename=("?)([^";]+)\1/)
+  const filename = match ? match[2] : fallbackName
+
+  const url = URL.createObjectURL(res.data)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
+}
+
+async function downloadCandidates(kind) {
+  exportError.value = ''
+  exporting.value = kind
+  try {
+    if (kind === 'xlsx') {
+      await downloadFile(
+        `/events/${route.params.id}/attendance-sheet`,
+        `attendance-${event.value?.event_code ?? route.params.id}.xlsx`,
+      )
+    } else {
+      await downloadFile(
+        `/events/${route.params.id}/candidates/export`,
+        `candidates-${event.value?.event_code ?? route.params.id}.csv`,
+      )
+    }
+  } catch {
+    exportError.value = 'Could not download the file. Please try again.'
+  } finally {
+    exporting.value = ''
+  }
+}
 </script>
 
 <template>
@@ -224,10 +281,27 @@ async function changeStatus(status) {
             @input="onCandidateSearch"
           />
           <span class="muted">{{ candidateTotal.toLocaleString() }} registered</span>
+          <button
+            class="btn btn-ghost"
+            type="button"
+            :disabled="!!exporting || candidateTotal === 0"
+            @click="downloadCandidates('xlsx')"
+          >
+            {{ exporting === 'xlsx' ? 'Preparing…' : '⬇ Excel' }}
+          </button>
+          <button
+            class="btn btn-ghost"
+            type="button"
+            :disabled="!!exporting || candidateTotal === 0"
+            @click="downloadCandidates('csv')"
+          >
+            {{ exporting === 'csv' ? 'Preparing…' : '⬇ CSV' }}
+          </button>
           <button class="btn btn-ghost add-cand-btn" type="button" @click="showAddCandidate = !showAddCandidate">
             {{ showAddCandidate ? '✕ Close' : '+ Add candidate' }}
           </button>
         </div>
+        <p v-if="exportError" class="export-error">{{ exportError }}</p>
 
         <AddCandidateModal
           v-if="showAddCandidate"
@@ -348,6 +422,7 @@ td { padding: 10px 8px; border-bottom: 1px solid #f1f5f9; }
 .cand-toolbar { display: flex; align-items: center; gap: 14px; margin-bottom: 12px; }
 .cand-toolbar input { width: 360px; max-width: 100%; padding: 10px 12px; border: 1px solid #cbd5e1; border-radius: 8px; }
 .add-cand-btn { margin-left: auto; }
+.export-error { color: #dc2626; font-size: 13px; margin: 0 0 10px; }
 .pager { display: flex; align-items: center; gap: 14px; margin-top: 14px; }
 .pager button:disabled { opacity: 0.5; cursor: not-allowed; }
 .badge { padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; }

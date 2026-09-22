@@ -80,10 +80,21 @@ class AppInfoController extends Controller
             }
         }
 
+        // The interface the OS itself uses to reach other networks — by
+        // definition the adapter other devices on the LAN can talk to. On
+        // Windows the machine hostname often resolves to a virtual
+        // WSL/Hyper-V adapter (172.x.x.x with no gateway), which is exactly
+        // what must NOT end up in the registration QR.
+        if ($routeIp = static::defaultRouteIp()) {
+            return static::withPort($routeIp);
+        }
+
         $candidates = [];
 
         // Resolving the machine hostname works even under `php artisan serve`,
-        // where Apache/FCGI-style $_SERVER keys are missing.
+        // where Apache/FCGI-style $_SERVER keys are missing. Kept only as a
+        // fallback: gethostbyname() can return a virtual-adapter address, so
+        // the default-route lookup above wins whenever it succeeds.
         $hostname = gethostname();
         if ($hostname) {
             $candidates[] = gethostbyname($hostname);
@@ -118,10 +129,85 @@ class AppInfoController extends Controller
     /** Append the API port unless it is a default one (80/443). */
     private static function withPort(string $ip): string
     {
-        $port = Request::server('SERVERPORT');
+        // PHP's $_SERVER key is SERVER_PORT (not "SERVERPORT" — that key never
+        // exists, which silently dropped the :8000 from registration links).
+        $port = Request::server('SERVER_PORT');
 
-        return $port && ! in_array($port, ['80', '443'], true)
+        return $port && ! in_array((string) $port, ['80', '443'], true)
             ? $ip.':'.$port
             : $ip;
+    }
+
+    /**
+     * The IPv4 address of the network interface that owns the default route,
+     * i.e. the adapter actually plugged into the LAN/Wi-Fi. Virtual adapters
+     * (WSL, Hyper-V, Wi-Fi Direct) never own it. Returns null when it cannot
+     * be determined (unknown OS, no route, command unavailable).
+     */
+    private static function defaultRouteIp(): ?string
+    {
+        $output = null;
+
+        if (PHP_OS_FAMILY === 'Windows') {
+            // `route print` output is locale-independent (IPs and numbers
+            // only), unlike ipconfig. Virtual adapters carry no default
+            // gateway, so the 0.0.0.0 route always points at the real NIC.
+            $output = @shell_exec('route print 0.0.0.0');
+        } elseif (PHP_OS_FAMILY === 'Linux') {
+            // Pure routing-table lookup — no packet is sent anywhere.
+            $output = @shell_exec('ip route get 1.1.1.1 2>/dev/null');
+        }
+
+        if (! is_string($output) || trim($output) === '') {
+            return null;
+        }
+
+        return PHP_OS_FAMILY === 'Windows'
+            ? static::parseWindowsRouteTable($output)
+            : static::parseLinuxRoute($output);
+    }
+
+    /**
+     * Extract the interface IP of the lowest-metric 0.0.0.0 route from
+     * `route print` output. Public for testability.
+     */
+    public static function parseWindowsRouteTable(string $output): ?string
+    {
+        // Rows: Destination  Netmask  Gateway  Interface  Metric
+        preg_match_all(
+            '/^\s*0\.0\.0\.0\s+0\.0\.0\.0\s+(\d{1,3}(?:\.\d{1,3}){3})\s+(\d{1,3}(?:\.\d{1,3}){3})\s+(\d+)\s*$/m',
+            $output,
+            $matches,
+            PREG_SET_ORDER
+        );
+
+        // Multi-homed PCs can have several default routes: trust the lowest
+        // metric, the one the OS itself would actually use.
+        $best = null;
+        foreach ($matches as $row) {
+            if (! static::isLanIp($row[2])) {
+                continue;
+            }
+            if ($best === null || (int) $row[3] < (int) $best[3]) {
+                $best = $row;
+            }
+        }
+
+        return $best[2] ?? null;
+    }
+
+    /**
+     * Extract the source IP from `ip route get` output, e.g.
+     * "1.1.1.1 via 192.168.88.1 dev wlan0 src 192.168.88.4". Public for
+     * testability.
+     */
+    public static function parseLinuxRoute(string $output): ?string
+    {
+        if (preg_match('/\bsrc\s+(\d{1,3}(?:\.\d{1,3}){3})/', $output, $m)
+            && static::isLanIp($m[1])) {
+            return $m[1];
+        }
+
+        return null;
     }
 }

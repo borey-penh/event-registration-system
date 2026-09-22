@@ -7,11 +7,60 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#0f766e" />
     <title>Event Registration System</title>
-    <script type="module" crossorigin src="/app/assets/index-IDMzrvX_.js"></script>
-    <link rel="modulepreload" crossorigin href="/app/assets/rolldown-runtime-hePW80VL.js">
-    <link rel="stylesheet" crossorigin href="/app/assets/index-DKk8jsmT.css">
+    <script type="module" crossorigin src="/app/assets/index-DupYMkbO.js"></script>
+    <link rel="modulepreload" crossorigin href="/app/assets/asyncToGenerator-CWxqCsJ-.js">
+    <link rel="stylesheet" crossorigin href="/app/assets/index-Czko_8KT.css">
   </head>
   <body>
-    <div id="app"></div>
+    <div id="app"></div>
+    <!-- ES5 boot guard: rendered ONLY when the JS boot fails (old in-app
+         webviews that cannot parse the bundle, or a failed asset load).
+         The inline ES5 script below unhides it after a timeout, and App.vue
+         clears it the moment Vue mounts, so a healthy browser never sees it.
+         Removes the old "white page, no message" dead end. -->
+    <div id="boot-fallback" style="display:none">
+      <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;background:#eaf7f0;font-family:system-ui,sans-serif">
+        <div style="max-width:420px;background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:28px;text-align:center;box-shadow:0 10px 30px rgba(15,118,110,.15)">
+          <div style="font-size:44px">📵</div>
+          <h1 style="font-size:19px;margin:10px 0 8px;color:#0f172a">This page can't open here</h1>
+          <p style="font-size:14px;color:#334155;line-height:1.6;margin:0 0 14px">
+            Your browser (or in-app webview) can't run this registration page.
+          </p>
+          <p style="font-size:14px;color:#0f766e;font-weight:600;line-height:1.6;margin:0 0 6px">
+            Open this link in Chrome instead:
+          </p>
+          <p style="font-size:13px;color:#334155;margin:0 0 14px;word-break:break-all">
+            1. Tap <b>⋮</b> (top-right) → <b>“Open in Chrome”</b><br />
+            2. If that fails, copy the link, open the <b>Chrome</b> app, and paste it.
+          </p>
+          <button
+            onclick="try{var v=location.href;var i=v.indexOf('#');if(i>-1)v=v.slice(0,i);navigator.clipboard.writeText(v);var m=document.getElementById('boot-copied');if(m)m.style.display='block'}catch(e){}"
+            style="background:#0f766e;color:#fff;border:0;border-radius:10px;padding:11px 22px;font-size:14px;font-weight:600;cursor:pointer"
+          >
+            Copy this link
+          </button>
+          <p id="boot-copied" style="display:none;color:#065f46;font-size:13px;font-weight:600;margin:10px 0 0">✓ Copied — now open Chrome and paste</p>
+        </div>
+      </div>
+    </div>
+    <script type="text/javascript">
+      // ES5, runs even where the module bundle cannot. If the app has not
+      // mounted within 4 seconds, show the guidance instead of a white page.
+      (function () {
+        var shown = false
+        function show() {
+          if (shown) return
+          shown = true
+          var el = document.getElementById('boot-fallback')
+          if (el) el.style.display = 'block'
+        }
+        setTimeout(show, 4000)
+        window.addEventListener('error', function (e) {
+          // Script/asset load failures mean the app can never mount here.
+          var tag = e && e.target && e.target.tagName
+          if (tag === 'SCRIPT' || tag === 'LINK') show()
+        }, true)
+      })()
+    </script>
   </body>
 </html>
