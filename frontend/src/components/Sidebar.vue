@@ -1,6 +1,7 @@
 <script setup>
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
+import heroImg from '../assets/hero.png'
 
 const emit = defineEmits(['close'])
 const props = defineProps({ open: { type: Boolean, default: false } })
@@ -21,7 +22,10 @@ watch(() => route.fullPath, () => emit('close'))
 
 <template>
   <aside class="sidebar" :class="{ 'sidebar-open': open }">
-    <div class="sidebar-logo">📋 EventReg</div>
+    <div class="sidebar-logo">
+      <img :src="heroImg" class="sidebar-logo-img" alt="" />
+      <span>EventReg</span>
+    </div>
     <nav class="sidebar-nav">
       <RouterLink
         v-for="link in links"
@@ -42,7 +46,8 @@ watch(() => route.fullPath, () => emit('close'))
   width: 220px; background: #0f766e; color: #fff;
   display: flex; flex-direction: column; padding: 16px 12px; gap: 16px;
 }
-.sidebar-logo { font-size: 18px; font-weight: 800; padding: 8px 12px; }
+.sidebar-logo { font-size: 18px; font-weight: 800; padding: 8px 12px; display: flex; align-items: center; gap: 9px; }
+.sidebar-logo-img { width: 52px; height: 52px; object-fit: over; border-radius: 50%; }
 .sidebar-nav { display: flex; flex-direction: column; gap: 4px; }
 .sidebar-link {
   display: flex; gap: 10px; align-items: center;

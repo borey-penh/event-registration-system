@@ -203,9 +203,25 @@ async function changeStatus(status) {
   event.value.status = data.status
 }
 
-// ---------- Candidate list export (CSV + printable Excel) ----------
-const exporting = ref('') // which export is running, '' = none
+// ---------- Candidate list export (Excel) ----------
+const exporting = ref(false) // true while the export runs
 const exportError = ref('')
+
+// One button, one job: always download the printable Attendance List.
+async function downloadAttendance() {
+  exportError.value = ''
+  exporting.value = true
+  try {
+    await downloadFile(
+      `/events/${route.params.id}/attendance-sheet`,
+      `attendance-${event.value?.event_code ?? route.params.id}.xlsx`,
+    )
+  } catch {
+    exportError.value = 'Could not download the file. Please try again.'
+  } finally {
+    exporting.value = false
+  }
+}
 
 async function downloadFile(path, fallbackName) {
   // Blob request instead of a plain <a href> so the Authorization header
@@ -222,28 +238,6 @@ async function downloadFile(path, fallbackName) {
   a.click()
   a.remove()
   URL.revokeObjectURL(url)
-}
-
-async function downloadCandidates(kind) {
-  exportError.value = ''
-  exporting.value = kind
-  try {
-    if (kind === 'xlsx') {
-      await downloadFile(
-        `/events/${route.params.id}/attendance-sheet`,
-        `attendance-${event.value?.event_code ?? route.params.id}.xlsx`,
-      )
-    } else {
-      await downloadFile(
-        `/events/${route.params.id}/candidates/export`,
-        `candidates-${event.value?.event_code ?? route.params.id}.csv`,
-      )
-    }
-  } catch {
-    exportError.value = 'Could not download the file. Please try again.'
-  } finally {
-    exporting.value = ''
-  }
 }
 </script>
 
@@ -281,23 +275,23 @@ async function downloadCandidates(kind) {
             @input="onCandidateSearch"
           />
           <span class="muted">{{ candidateTotal.toLocaleString() }} registered</span>
+          <!-- Single download button: always exports the printable Attendance List.
+               Disabled while the export runs or the list is empty. -->
           <button
-            class="btn btn-ghost"
+            class="btn btn-primary export-btn"
             type="button"
-            :disabled="!!exporting || candidateTotal === 0"
-            @click="downloadCandidates('xlsx')"
+            :disabled="exporting || candidateTotal === 0"
+            @click="downloadAttendance"
           >
-            {{ exporting === 'xlsx' ? 'Preparing…' : '⬇ Excel' }}
+            <svg class="export-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="3" x2="12" y2="15" />
+            </svg>
+            {{ exporting ? 'Preparing…' : 'Attendance List' }}
+            <span v-if="exporting" class="export-spinner" aria-hidden="true"></span>
           </button>
-          <button
-            class="btn btn-ghost"
-            type="button"
-            :disabled="!!exporting || candidateTotal === 0"
-            @click="downloadCandidates('csv')"
-          >
-            {{ exporting === 'csv' ? 'Preparing…' : '⬇ CSV' }}
-          </button>
-          <button class="btn btn-ghost add-cand-btn" type="button" @click="showAddCandidate = !showAddCandidate">
+          <button class="btn btn-ghost" type="button" @click="showAddCandidate = !showAddCandidate">
             {{ showAddCandidate ? '✕ Close' : '+ Add candidate' }}
           </button>
         </div>
@@ -421,7 +415,18 @@ td { padding: 10px 8px; border-bottom: 1px solid #f1f5f9; }
 .candidate-row:focus-visible { outline: 2px solid #14b8a6; outline-offset: -2px; }
 .cand-toolbar { display: flex; align-items: center; gap: 14px; margin-bottom: 12px; }
 .cand-toolbar input { width: 360px; max-width: 100%; padding: 10px 12px; border: 1px solid #cbd5e1; border-radius: 8px; }
-.add-cand-btn { margin-left: auto; }
+
+
+/* ---------- Attendance List download button ---------- */
+.export-btn { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; }
+.export-icon { width: 16px; height: 16px; flex: 0 0 auto; }
+.export-spinner {
+  width: 14px; height: 14px; border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.4);
+  border-top-color: #fff;
+  animation: export-spin 0.7s linear infinite;
+}
+@keyframes export-spin { to { transform: rotate(360deg); } }
 .export-error { color: #dc2626; font-size: 13px; margin: 0 0 10px; }
 .pager { display: flex; align-items: center; gap: 14px; margin-top: 14px; }
 .pager button:disabled { opacity: 0.5; cursor: not-allowed; }

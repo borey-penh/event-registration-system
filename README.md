@@ -93,8 +93,8 @@ Protected (`Authorization: Bearer <token>`):
 - `PUT  /api/events/{id}/questions` — replace the form builder questions
 - `GET  /api/events/{id}/stats` — total / joined counts
 - `GET  /api/candidates` — search candidates
-- `GET  /api/events/{id}/candidates/export` — download the event's candidate list as CSV
-- `POST /api/check-in` — body `{ "qr_token": "REG-..." }` → joined / already_joined / not_found
+- `GET  /api/events/{id}/candidates/export` — download the candidate list as a styled Excel workbook (`?style=full` — default — every column + form answers, or `?style=contacts` — name/email/phone/institution/status)
+- `GET  /api/events/{id}/attendance-sheet` — printable "Attendance List" Excel sheet (logo, legends, checkbox columns)
 - `POST /api/check-in/{registration}/undo` — revert a check-in
 
 ## Database tables

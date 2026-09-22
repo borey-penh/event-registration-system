@@ -8,6 +8,7 @@ use App\Models\FormQuestion;
 use App\Models\Registration;
 use App\Models\RegistrationAnswer;
 use App\Support\AttendanceSheet;
+use App\Support\CandidateListExport;
 use App\Support\DefaultForm;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -310,69 +311,23 @@ class EventController extends Controller
     }
 
     /**
-     * Download the full candidate list for one event as CSV. Streams rows in
-     * lazy chunks straight to the output, so an event with a million
-     * registrations exports with constant memory — same principle as the
-     * paginated list. One extra column per form question, in form order.
+     * Download the candidate list for one event as a styled Excel workbook.
+     * Styles: 'full' (every column + form answers) or 'contacts' (name,
+     * email, phone, institution, status). Rows are chunked from the database
+     * so an event with a million registrations exports with constant memory
+     * — same principle as the paginated list. Replaces the old CSV export.
      */
     public function exportCandidates(Request $request, Event $event): StreamedResponse
     {
-        $questions = $event->questions()->orderBy('order')->get(['id', 'question']);
+        $style = $request->query('style') === 'contacts' ? 'contacts' : 'full';
 
-        $filename = 'candidates-'.$event->event_code.'.csv';
-
-        return response()->streamDownload(function () use ($event, $questions) {
-            $out = fopen('php://output', 'w');
-
-            // UTF-8 BOM so Excel renders accented names correctly.
-            fwrite($out, "\xEF\xBB\xBF");
-
-            $header = [
-                'No', 'Code', 'Name', 'Email', 'Phone', 'Telegram', 'Institution',
-                'Role', 'Status', 'Registered at', 'Checked in at', 'Check-in code',
-            ];
-            foreach ($questions as $q) {
-                $header[] = static::csvSafe($q->question);
-            }
-            fputcsv($out, $header, ',', '"', '\\');
-
-            $no = 0;
-            $event->registrations()
-                ->with('candidate', 'answers')
-                ->lazyById(500, 'registrations.id')
-                ->each(function (Registration $reg) use (&$no, $out, $questions) {
-                    $no++;
-
-                    $answers = $reg->answers->mapWithKeys(
-                        fn (RegistrationAnswer $a) => [$a->question_id => $a->answer]
-                    );
-
-                    $row = [
-                        $no,
-                        static::csvSafe($reg->candidate->candidate_code),
-                        static::csvSafe($reg->candidate->name),
-                        static::csvSafe((string) $reg->candidate->email),
-                        static::csvSafe((string) $reg->candidate->phone),
-                        static::csvSafe((string) $reg->candidate->telegram_username),
-                        static::csvSafe((string) $reg->candidate->institution),
-                        static::csvSafe((string) $reg->candidate->role),
-                        $reg->attendance_status,
-                        $reg->registered_at?->toDateTimeString() ?? '',
-                        $reg->joined_at?->toDateTimeString() ?? '',
-                        static::csvSafe($reg->qr_token),
-                    ];
-
-                    foreach ($questions as $q) {
-                        $row[] = static::csvSafe((string) ($answers[$q->id] ?? ''));
-                    }
-
-                    fputcsv($out, $row, ',', '"', '\\');
-                });
-
-            fclose($out);
-        }, $filename, [
-            'Content-Type' => 'text/csv; charset=UTF-8',
-        ]);
+        return response()->streamDownload(
+            fn () => app(CandidateListExport::class, ['event' => $event, 'style' => $style])->save('php://output'),
+            CandidateListExport::filename($event, $style),
+            [
+                'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            ],
+        );
     }
 
     /**
@@ -391,17 +346,4 @@ class EventController extends Controller
         );
     }
 
-    /**
-     * Neutralize Excel/Sheets CSV formula injection: a cell starting with
-     * =, +, - or @ would execute as a formula when the file is opened. The
-     * leading apostrophe forces text mode (Excel hides it on display).
-     */
-    private static function csvSafe(?string $value): string
-    {
-        if ($value !== null && $value !== '' && strpbrk($value[0], '=+-@') !== false) {
-            return "'".$value;
-        }
-
-        return $value ?? '';
-    }
 }
