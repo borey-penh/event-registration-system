@@ -261,7 +261,7 @@ async function downloadFile(path, fallbackName) {
       </div>
 
       <div class="tabs">
-        <button :class="{ active: tab === 'candidates' }" @click="tab = 'candidates'">Candidates ({{ candidates.length }})</button>
+        <button :class="{ active: tab === 'candidates' }" @click="tab = 'candidates'">Attendance ({{ candidates.length }})</button>
         <button :class="{ active: tab === 'form' }" @click="tab = 'form'">Registration Form ({{ questions.length }})</button>
         <button :class="{ active: tab === 'share' }" @click="tab = 'share'">Registration QR</button>
       </div>

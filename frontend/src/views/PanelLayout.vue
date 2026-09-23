@@ -21,6 +21,11 @@ const menuOpen = ref(false)
       <main class="panel-content">
         <RouterView />
       </main>
+      <!-- Status bar: pinned under the content area, like the design -->
+      <footer class="panel-footer">
+        <span class="foot-copy">© 2026 LLC-Event — Professional Event Registration &amp; Verification Platform</span>
+        <span class="status-ok">● All systems operational</span>
+      </footer>
     </div>
   </div>
 </template>
@@ -43,8 +48,25 @@ const menuOpen = ref(false)
   overflow-y: auto;
   overflow-x: hidden;
   padding: 24px;
-  background: #f1f5f9;
+  background: #f7fafc;
 }
+
+/* Full-width mint status bar pinned at the bottom of the content area */
+.panel-footer {
+  flex: 0 0 auto;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 13px 24px;
+  background: #e7f8f1;
+  border-top: 1px solid #d3efe3;
+  color: #7c8ba1;
+  font-size: 12.5px;
+}
+.foot-copy { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.status-ok { color: #059669; font-weight: 700; white-space: nowrap; }
 
 /* Small screens (phones): fixed drawer + dimmed backdrop */
 @media (max-width: 768px) {
@@ -68,6 +90,14 @@ const menuOpen = ref(false)
   .panel-content {
     overflow: visible;
     padding: 16px;
+  }
+  .panel-footer {
+    flex-direction: column;
+    justify-content: center;
+    gap: 4px;
+    padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 0px));
+    font-size: 11px;
+    text-align: center;
   }
 }
 </style>

@@ -40,7 +40,7 @@ async function submitManual() {
 
 <template>
   <div>
-    <h1>Scan QR — Check-in</h1>
+    <h1>Check-in</h1>
 
     <div class="scan-grid">
       <div class="card">

@@ -232,7 +232,7 @@ function validate() {
     <!-- ================= Navbar (logged in only) ================= -->
     <nav v-if="account" class="reg-nav">
       <div class="reg-nav-inner">
-        <div class="nav-brand">📋 <span>EventReg</span></div>
+        <div class="nav-brand">📋 <span>LLC-Event</span></div>
         <div class="nav-user">
           <span class="nav-avatar">{{ (account.name || account.email || '?').charAt(0).toUpperCase() }}</span>
           <span class="nav-user-name">{{ account.name || account.email }}</span>

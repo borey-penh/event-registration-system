@@ -58,7 +58,7 @@ onMounted(load)
 
 <template>
   <div>
-    <h1>Candidates</h1>
+    <h1>Attendance</h1>
     <div class="card">
       <div class="toolbar">
         <input
